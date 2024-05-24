@@ -1,0 +1,53 @@
+Integrazione API di SEOZoom in Screaming Frog
+Thanks to Giuseppe Liguori https://www.linkedin.com/posts/liguorigiuseppe_integrare-i-dati-di-seozoom-in-screaming-activity-7199692750320021505-aws7
+
+Aprire il menu Configuration di Screaming Frog
+Andare su Custom -> Custom Javascript
+
+
+
+
+Cliccare sul tasto Add
+Copia e incolla questo script
+
+
+const API_KEY = 'APIKEY'; //Set your API Key here
+const DB = 'it';  // Set the database parameter here
+
+const fetchApi = () => {
+	const url = `https://apiv2.seozoom.com/api/v2/urls/?api_key=${API_KEY}&action=urlpza&url=` + encodeURIComponent(document.URL) + `&db=${DB}`;
+	return fetch(url)
+    	.then(response => {
+        	if (!response.ok) {
+            	return response.text().then(text => { throw new Error(text) });
+        	}
+        	return response.json();
+    	})
+    	.then(data => {
+        	if (data.response && data.response.length > 0) {
+            	return data.response[0].pza;  // Return only the 'pza' value
+        	} else {
+            	throw new Error('Value not found in the API response');
+        	}
+    	});
+};
+
+return fetchApi()
+	.then(value => {
+    	return seoSpider.data(value);
+	})
+	.catch(error => {
+    	return seoSpider.error(error.toString());
+	});
+
+
+
+Sostituire il campo APIKEY con quello fornito da SEOZoom.
+Per prelevare l’APIKEY bisogna loggarsi su SEOZoom e andare su questo indirizzo:
+https://sz2020.seozoom.it/apidashboard
+Copiare il valore presente nel campo Api Key
+
+
+
+
+Ricordatevi di attivare in Screaming Frog la modalità Rendering Javascript altrimenti i custom Javascript non funzionano
