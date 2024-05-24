@@ -1,0 +1,49 @@
+Script to Demetrio Orecchio
+
+const OPENAI_API_KEY = 'YOUR API OPENAI';
+
+function chatGptRequest(imgUrl) {
+    const postData = {
+        "model": "gpt-4-vision-preview",
+        "messages": [
+            {
+                role: "user",
+                content: [
+                    {
+                        "type": "text",
+                        "text": "you are an SEO expert. For each page provide a Title that must not exceed 60 characters. Take inspiration from the content of the page to provide a Title that is comprehensive. Under no circumstances can you exceed 60 characters!"
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": { "url": `${imgUrl}` }
+                    }
+                ]
+            }
+        ],
+        "max_tokens": 300
+    };
+
+    const fetchOptions = {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(postData)
+    };
+
+    return fetch('https://api.openai.com/v1/chat/completions', fetchOptions)
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(text => {throw new Error(text)});
+            }
+            return response.json();
+        })
+        .then(data => data.choices[0].message.content.trim());
+}
+
+const pageUrl = window.location.href;
+return chatGptRequest(pageUrl)
+    .then(altText => seoSpider.data(altText))
+    .catch(error => seoSpider.error(error));
+
