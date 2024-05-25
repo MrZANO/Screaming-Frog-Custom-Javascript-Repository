@@ -1,0 +1,214 @@
+#Thanks to Mark Williams-Cook https://www.linkedin.com/posts/markseo_seo-activity-7193930068727894017-gXjX?utm_source=share&utm_medium=member_desktop
+
+
+const settings = {
+  chatGpt: {
+    // replace with your ChatGPT API key created at https://platform.openai.com/api-keys
+    apiKey: 'ENTER CHATGPT API KEY',
+
+    // the OpenAI model to use
+    model: 'gpt-4-turbo',
+  },
+  alsoAsked: {
+    // replace with your AlsoAsked API key created at https://alsoasked.com/developer/keys
+    apiKey:
+      'ENTER ALSOASKED API KEY',
+
+    // the language to search in
+    language: 'en',
+
+    // the region to search in
+    region: 'gb',
+
+    // the depth of the search
+    // 2 is the default and returns the smallest number of questions, and costs 1 credit
+    // 3 is the maximum and returns the largest number of questions, but costs 4 credits
+    depth: 2,
+
+    // whether to perform a fresh search, or attempt to use cached results
+    // if cached results exist, this will not count towards your credit usage
+    fresh: true,
+  },
+};
+
+const pageH1 = document.querySelector('h1') ? document.querySelector('h1').innerText : '';
+
+// ensure the page h1 is not empty
+if (!pageH1) {
+  return seoSpider.error('The page h1 is empty');
+}
+
+// get questions from the AlsoAsked API using the page h1
+const getQuestions = new Promise(async (resolve, reject) => {
+  try {
+    // the options to send to the AlsoAsked API search endpoint
+    const searchOptions = {
+      terms: [pageH1],
+      language: settings.alsoAsked.language,
+      region: settings.alsoAsked.region,
+      depth: settings.alsoAsked.depth,
+      fresh: settings.alsoAsked.fresh,
+      async: false,
+      notify_webhooks: false,
+    };
+
+    // fetch the People Also Ask questions from the AlsoAsked API
+    const response = await fetch('https://alsoaskedapi.com/v1/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': settings.alsoAsked.apiKey,
+      },
+      body: JSON.stringify(searchOptions),
+    });
+
+    // ensure the response was successful
+    if (!response.ok) {
+      reject(
+        `Failed to fetch questions from the AlsoAsked API: ${response.statusText}`
+      );
+      return;
+    }
+
+    const data = await response.json();
+
+    // check the response status
+    if (data.status === 'error') {
+      reject('Failed to fetch questions from the AlsoAsked API');
+      return;
+    }
+
+    if (data.status === 'no_results') {
+      reject(`No questions were found for the term "${pageH1}"`);
+      return;
+    }
+
+    if (data.status !== 'success') {
+      reject(
+        `Failed to fetch questions from the AlsoAsked API: ${data.status}`
+      );
+      return;
+    }
+
+    // ensure we have the results for the term we sent
+    // this should never not be the case, as we've checked
+    // for errors above
+    const queries = data.queries;
+
+    if (queries.length === 0) {
+      reject(`No questions were found for the term "${pageH1}"`);
+      return;
+    }
+
+    // we only sent one term, so we should only get one set of questions back
+    const query = queries[0];
+
+    // flatten the questions into a single array
+    const flattenResults = (questions) => {
+      return questions.reduce((flattenedQuestions, result) => {
+        flattenedQuestions.push(result.question);
+
+        // if the question has children, flatten them too
+        if (result.results) {
+          flattenedQuestions.push(...flattenResults(result.results));
+        }
+        return flattenedQuestions;
+      }, []);
+    };
+
+    const questions = flattenResults(query.results);
+    resolve(questions);
+  } catch (error) {
+    reject(`Failed to fetch questions from the AlsoAsked API: \n${error}`);
+    return;
+  }
+});
+
+// query the ChatGPT API to find unanswered questions
+const queryChatGpt = (questions) => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      // the options to send to the ChatGPT API completions endpoint
+      const completionsOptions = {
+        model: settings.chatGpt.model,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: `List the questions in this JSON array ${JSON.stringify(
+              questions
+            )} which are not answered in the text content of this page, but would make sense to answer in context to the rest of the content. Output the questions that are not answered in a JSON array of strings within an object called unanswered_questions.`,
+          },
+          {
+            role: 'user',
+            content: document.body.textContent,
+          },
+        ],
+      };
+
+      // fetch the unanswered questions from the ChatGPT API
+      const response = await fetch(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${settings.chatGpt.apiKey}`,
+          },
+          body: JSON.stringify(completionsOptions),
+        }
+      );
+
+      // ensure the response was successful
+      if (!response.ok) {
+        reject(
+          `Failed to fetch response from the ChatGPT API: ${response.statusText}`
+        );
+        return;
+      }
+
+      // ensure we have a response from the ChatGPT API to our question
+      const data = await response.json();
+      const choices = data.choices;
+
+      if (!choices || choices.length === 0) {
+        reject('No response was returned from the ChatGPT API');
+        return;
+      }
+
+      // ensure the response contains the unanswered questions
+      const responseText = choices[0].message.content;
+
+      if (!responseText) {
+        reject('No response was returned from the ChatGPT API');
+        return;
+      }
+
+      // parse the response text as JSON
+      // from the question we asked, we expect the format to be
+      // { "unanswered_questions": ["question 1", "question 2", ...] }
+      const result = JSON.parse(responseText);
+
+      if (!result.unanswered_questions) {
+        reject('No unanswered questions were found in the response');
+        return;
+      }
+
+      resolve(result.unanswered_questions);
+    } catch (error) {
+      reject(`Failed to fetch response from the ChatGPT API: \n${error}`);
+      return;
+    }
+  });
+};
+
+// initially get the questions from the AlsoAsked API based on the
+// page h1, then query the ChatGPT API to find unanswered questions
+return getQuestions
+  .then(queryChatGpt)
+  .then((unansweredQuestions) => {
+    return seoSpider.data(unansweredQuestions);
+  })
+  .catch((error) => {
+    return seoSpider.error(error);
+  });
