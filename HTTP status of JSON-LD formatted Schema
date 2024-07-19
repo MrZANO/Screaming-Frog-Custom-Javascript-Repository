@@ -1,0 +1,124 @@
+/*
+Screaming Frog JS snippet
+Version: 1.0 - July 10th 2024
+Info: Fetches HTTP status of JSON-LD formatted Schema properties that contain a URL in their value.
+Author: Žan Ivanovič | https://linkedin.com/in/zan-ivanovic
+Usage:
+1. Paste the script into in crawl config > custom > custom javascript > Add
+2. In the Snippet Editor, make sure the mode is set to "Extraction" and “Content types” is "text/html"
+3. Run the crawl using Javascript rendering
+4. See the results in Custom Javascript tab
+*/
+const checkNon200StatusesOnly = true; // Change this flag to false to report all schema URLs
+
+// Function to fetch and log the HTTP status
+const fetchHttpStatus = async (url) => {
+    try {
+        // Try to fetch using the HEAD method
+        let response = await fetch(url, { method: 'HEAD' });
+        if (!response.ok) throw new Error(response.status);
+        return response.status;
+    } catch (headError) {
+        // If HEAD fails, fetch using the GET method
+        try {
+            let response = await fetch(url);
+            if (!response.ok) throw new Error(response.status);
+            return response.status;
+        } catch (getError) {
+            // Handle errors from GET method
+            return seoSpider.error(getError.message || getError.response || "Unknown error occurred");
+        }
+    }
+};
+
+// Function to decode escaped characters in JSON
+const decodeJson = (jsonString) => {
+    try {
+        return JSON.parse(jsonString);
+    } catch (error) {
+        return seoSpider.error("Error decoding JSON");
+    }
+};
+
+// Main function to extract JSON-LD content and fetch HTTP statuses
+async function extractAndFetchStatuses() {
+    // Define the first regex pattern to match the JSON-LD content with optional attributes
+    const regex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/g;
+
+    // Get the entire HTML content of the page
+    const htmlContent = document.documentElement.innerHTML;
+
+    // Apply the first regex to find all JSON-LD script contents
+    const matches = [...htmlContent.matchAll(regex)];
+
+    // Check if there are any matches
+    if (matches.length === 0) {
+        const errorMessage = "No JSON-LD <script> tag found";
+        return seoSpider.error(errorMessage);
+    }
+
+    // List of properties that support URL - extracted from schema.org/URL
+    const propertiesToCheck = new Set(["acceptsReservations","acquireLicensePage","actionPlatform","actionableFeedbackPolicy","additionalType","afterMedia","applicationCategory","applicationSubCategory","archivedAt","artMedium","artform","artworkSurface","asin","associatedDisease","bankAccountType","beforeMedia","benefitsSummaryUrl","bodyType","category","childTaxon","codeRepository","colleague","colorSwatch","competencyRequired","constraintProperty","contentUrl","correction","correctionsPolicy","courseMode","credentialCategory","discussionUrl","diseasePreventionInfo","diseaseSpreadStatistics","diversityPolicy","diversityStaffingReport","documentation","downloadUrl","duringMedia","editEIDR","educationalCredentialAwarded","educationalLevel","educationalProgramMode","embedUrl","encodingFormat","engineType","ethicsPolicy","featureList","feesAndCommissionsSpecification","fileFormat","fuelType","gameLocation","gamePlatform","genre","gettingTestedInfo","gtin","hasGS1DigitalLink","hasMap","hasMenu","hasMolecularFunction","hasRepresentation","healthPlanMarketingUrl","identifier","image","inCodeSet","inDefinedTermSet","installUrl","isBasedOn","isBasedOnUrl","isInvolvedInBiologicalProcess","isLocatedInSubcellularLocation","isPartOf","keywords","knowsAbout","labelDetails","layoutImage","legislationIdentifier","license","loanType","logo","mainEntityOfPage","map","maps","masthead","material","measurementMethod","measurementTechnique","meetsEmissionStandard","memoryRequirements","menu","merchantReturnLink","missionCoveragePrioritiesPolicy","namedPosition","newsUpdatesAndGuidelines","noBylinesPolicy","occupationalCredentialAwarded","originalMediaLink","ownershipFundingInfo","parentTaxon","paymentUrl","physicalRequirement","prescribingInfo","productReturnLink","propertyID","publicTransportClosuresInfo","publishingPrinciples","quarantineGuidelines","relatedLink","releaseNotes","replyToUrl","requirements","roleName","sameAs","schemaVersion","schoolClosuresInfo","screenshot","sdLicense","season","securityClearanceRequirement","sensoryRequirement","serviceUrl","shippingSettingsLink","significantLink","significantLinks","softwareRequirements","speakable","sport","statType","storageRequirements","surface","target","targetUrl","taxonRank","taxonomicRange","temporalCoverage","termsOfService","thumbnailUrl","ticketToken","titleEIDR","tourBookingPage","trackingUrl","travelBans","unitCode","unnamedSourcesPolicy","url","usageInfo","usesHealthPlanIdStandard","vehicleTransmission","verificationFactCheckingPolicy","warning","webFeed"]);
+    // Array to store the results
+    const results = [];
+    // Counter for URLs checked
+    let urlsChecked = 0;
+
+    // Get the domain of the current page
+    const domain = window.location.protocol + "//" + window.location.host;
+
+    // Iterate through all matches
+    for (const match of matches) {
+        // Decode the JSON-LD content
+        const decodedJsonLdContent = decodeJson(match[1]);
+
+        // Define the second regex pattern capturing URLs starting with http or /
+        const regex2 = /"([^"]+)"\s*:\s*"(http[^"]+|\/[^"]+)"/g;
+
+        // Convert the decoded JSON back to string for regex matching
+        const jsonLdString = JSON.stringify(decodedJsonLdContent);
+
+        // Apply the second regex to the extracted JSON-LD content
+        const matches2 = [...jsonLdString.matchAll(regex2)];
+
+        // Iterate through the matches and fetch HTTP statuses
+        for (const match2 of matches2) {
+            const property = match2[1];
+            let value = match2[2];
+
+            // If the URL starts with /, concatenate the domain
+            if (value.startsWith("/")) {
+                value = domain + value;
+            }
+
+            // Check if the property is in the set and fetch HTTP status
+            if (propertiesToCheck.has(property)) {
+                const status = await fetchHttpStatus(value);
+                urlsChecked++;
+                if (!checkNon200StatusesOnly || status !== 200) {
+                    results.push({ property, value, status });
+                }
+            }
+        }
+    }
+
+    // If no URLs were checked, output a specific message
+    if (urlsChecked === 0) {
+        const message = "No URLs found in JSON-LD";
+        console.log(message);
+        return seoSpider.data(message);
+    }
+
+    // If checkNon200StatusesOnly is true and no results are found
+    if (checkNon200StatusesOnly && results.length === 0) {
+        const message = urlsChecked + " URLs were checked, but all returned status 200.";
+        return seoSpider.data(message);
+    }
+
+    return seoSpider.data(results);
+}
+
+// Call the main function and return the results
+return extractAndFetchStatuses().catch(error => {
+    return seoSpider.error("Unexpected error occurred: " + (error.message || error.response || "Unknown error"));
+});
